@@ -2287,12 +2287,17 @@ function startNewConversation() {
             <h1>Discover<br />Research <span>Questions</span> in Literature</h1>
             <p>Grounded research discussion over real medical literature: literature search, hotspot analysis, topic refinement, review-writing guidance and research history management.</p>
             <div className="home-composer small">
-              <textarea
-                value={homeInput}
-                onChange={(e) => setHomeInput(e.target.value)}
-                placeholder="e.g. recent research hotspots on CKD"
-                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); enterFromHome(); } }}
-              />
+              <div className="home-input-main">
+                <label className="home-input-label" htmlFor="home-research-input">Start a research question</label>
+                <textarea
+                  id="home-research-input"
+                  value={homeInput}
+                  onChange={(e) => setHomeInput(e.target.value)}
+                  placeholder="Type a disease, topic, or research question…"
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); enterFromHome(); } }}
+                />
+                <span className="home-input-hint">Press Enter to begin · Shift + Enter for a new line</span>
+              </div>
               <div className="home-compose-actions">
                 <label className="icon-square" title="Upload files"><Paperclip size={18} /><input hidden type="file" multiple onChange={(e) => handleHomeUpload(e.target.files)} /></label>
                 <button className="icon-square send" onClick={enterFromHome} title="Start"><Send size={17} /></button>

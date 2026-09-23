@@ -875,3 +875,48 @@ html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
 .demo-progress-step{font-size:12px;color:rgba(255,255,255,.82);white-space:nowrap;font-variant-numeric:tabular-nums}
 /* Demo mode: desktop right panel narrows to leave more space for the main chat area */
 .app-shell.desktop-layout .result-sidebar:not(.collapsed).demo-running{width:320px!important;min-width:300px!important}
+
+/* Home research input: visually distinct while preserving the editorial hero style. */
+.home-composer{
+  max-width:760px;
+  grid-template-columns:minmax(0,1fr) auto;
+  padding:13px 13px 13px 17px;
+  border:1px solid rgba(255,255,255,.28);
+  border-radius:16px;
+  background:linear-gradient(110deg,rgba(31,22,18,.82),rgba(42,29,23,.6));
+  box-shadow:0 16px 45px rgba(0,0,0,.2),inset 0 1px 0 rgba(255,255,255,.07);
+  backdrop-filter:blur(12px);
+  transition:border-color .2s ease,background .2s ease,box-shadow .2s ease,transform .2s ease;
+}
+.home-composer:hover{
+  border-color:rgba(226,174,130,.52);
+  background:linear-gradient(110deg,rgba(35,24,20,.88),rgba(48,32,25,.66));
+}
+.home-composer:focus-within{
+  border-color:rgba(232,185,145,.88);
+  box-shadow:0 18px 52px rgba(0,0,0,.25),0 0 0 3px rgba(226,174,130,.12),inset 0 1px 0 rgba(255,255,255,.1);
+  transform:translateY(-1px);
+}
+.home-input-main{min-width:0;display:flex;flex-direction:column;gap:2px}
+.home-input-label{width:max-content;color:#e8b98f;font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;cursor:text}
+.home-composer.small textarea{
+  width:100%;
+  height:38px;
+  min-height:38px;
+  padding:5px 0 2px;
+  font-size:16px;
+  font-weight:500;
+}
+.home-composer textarea::placeholder{color:rgba(255,255,255,.68)}
+.home-input-hint{color:rgba(255,247,239,.48);font-size:10px;line-height:1.35}
+.home-compose-actions{align-self:center}
+.home-composer .icon-square{background:rgba(255,255,255,.1);transition:transform .18s ease,background .18s ease,border-color .18s ease}
+.home-composer .icon-square:hover{transform:translateY(-1px);background:rgba(255,255,255,.17);border-color:rgba(255,255,255,.42)}
+.home-composer .icon-square.send{background:linear-gradient(135deg,#c62d36,var(--red-dark));box-shadow:0 7px 18px rgba(171,32,40,.34)}
+
+@media(max-width:600px){
+  .home-composer{padding:11px 10px 11px 13px;border-radius:14px;gap:8px}
+  .home-input-label{font-size:10px;letter-spacing:.07em}
+  .home-input-hint{display:none}
+  .home-composer.small textarea{height:34px;min-height:34px;font-size:14px}
+}
