@@ -1230,10 +1230,7 @@ export default function HomePage() {
     setSearchTotalCount(0);
     setActiveSearchQuery(q);
     setActiveOriginalSearchText(naturalQuery);
-    const displayTerms = searchSummary?.trim() || buildFallbackMedicalQuery(
-      naturalQuery,
-      messagesRef.current.slice(-8).map((message) => message.content).join('\n'),
-    ).summary;
+    const displayTerms = searchSummary?.trim() || buildFallbackMedicalQuery(naturalQuery).summary;
     setSearchEditText(displayTerms);
 
     setSearching(true);
@@ -1557,24 +1554,7 @@ export default function HomePage() {
       setMessages((current) => [...current, { role: 'assistant', content: DEMO_SUPPLEMENTARY_SEARCH_REPLY }]);
       return;
     }
-    try {
-      const intentRes = await fetch(appUrl('/api/ai/intent'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: `Search ${text}`,
-          history: messagesRef.current.filter((m) => !m.streaming).slice(-6).map((m) => ({ role: m.role, content: m.content })),
-        }),
-      });
-      const intent = await intentRes.json();
-      await runSearch(intent.searchQuery || text, false, intent.searchSummary, text);
-    } catch {
-      const fallback = buildFallbackMedicalQuery(
-        text,
-        messagesRef.current.slice(-8).map((message) => message.content).join('\n'),
-      );
-      await runSearch(fallback.query, false, fallback.summary, text);
-    }
+    await runSearch(text, false, text, text);
   }
 
 
@@ -1736,23 +1716,11 @@ async function sendMessage(overrideText?: string, modeOverride?: UserMode, hidde
     }
 
     if (immediateAction === 'search') {
-      setRouting(true);
-      let intent: IntentDecision | null = null;
-      try {
-        intent = await requestIntentWithTimeout(text);
-      } catch (error) {
-        console.warn('[Intent] Search-query generation failed; using local concept extraction:', error);
-      } finally {
-        setRouting(false);
-      }
-      const fallback = buildFallbackMedicalQuery(
-        text,
-        messagesRef.current.slice(-8).map((message) => message.content).join('\n'),
-      );
+      const fallback = buildFallbackMedicalQuery(text);
       await runSearch(
-        intent?.searchQuery || fallback.query,
+        fallback.query,
         false,
-        intent?.searchSummary || fallback.summary,
+        fallback.summary,
         text,
         effectiveMode,
       );
@@ -1781,7 +1749,8 @@ async function sendMessage(overrideText?: string, modeOverride?: UserMode, hidde
       }
 
       if (intent.action === 'search') {
-        await runSearch(intent.searchQuery || text, false, intent.searchSummary, text, effectiveMode);
+        const keyword = buildFallbackMedicalQuery(text);
+        await runSearch(keyword.query, false, keyword.summary, text, effectiveMode);
         return;
       }
 
@@ -1824,10 +1793,7 @@ async function sendMessage(overrideText?: string, modeOverride?: UserMode, hidde
       await streamChat(text, undefined, hiddenInstruction);
     } catch {
       if (/search|find\s+(papers|articles|literature)|research\s+progress|clinical\s+evidence|PubMed|Web\s*of\s*Science|impact\s+factor|JCR/i.test(text)) {
-        const fallback = buildFallbackMedicalQuery(
-          text,
-          messagesRef.current.slice(-8).map((message) => message.content).join('\n'),
-        );
+        const fallback = buildFallbackMedicalQuery(text);
         await runSearch(fallback.query, false, fallback.summary, text, effectiveMode);
         return;
       }
@@ -2766,7 +2732,7 @@ function startNewConversation() {
                   ? 'Hotspot directions, yearly trends and supporting rationale'
                   : searchSources.length === 2
                     ? `PubMed ${sourceTotals.pubmed.toLocaleString()} · WoS ${sourceTotals.wos.toLocaleString()} · Merged ${papers.length} · Showing ${visiblePapers.length}`
-                    : `${searchTotalCount.toLocaleString()} papers across all years · ${papers.length} loaded · Showing ${visiblePapers.length}`}
+                    : `${searchTotalCount.toLocaleString()} papers${useTime && yearRange !== 'any' ? ' in selected date range' : ' across all years'} · ${papers.length} loaded · Showing ${visiblePapers.length}`}
               </p>
             </div>
           )}

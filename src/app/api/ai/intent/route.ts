@@ -19,7 +19,15 @@ interface IntentResult {
 function fastIntent(message: string): IntentResult | null {
   const text = message.trim();
   if (/hotspot|research\s+trend|research\s+frontier|trend\s+analysis/i.test(text)) return { action: 'hotspots', reason: 'Explicit hotspot-analysis intent.' };
-  if (/search|look\s+up|find\s+(papers|articles|literature)|PubMed|Web\s*of\s*Science|\bWOS\b|impact\s+factor|\bJIF\b|\bJCR\b|\bQ[1-4]\b|clinical\s+evidence|research\s+progress/i.test(text)) return { action: 'search', searchQuery: text, reason: 'Explicit literature-search intent.' };
+  if (/search|look\s+up|find\s+(papers|articles|literature)|PubMed|Web\s*of\s*Science|\bWOS\b|impact\s+factor|\bJIF\b|\bJCR\b|\bQ[1-4]\b|clinical\s+evidence|research\s+progress/i.test(text)) {
+    const keyword = buildFallbackMedicalQuery(text);
+    return {
+      action: 'search',
+      searchQuery: keyword.query,
+      searchSummary: keyword.summary,
+      reason: 'Explicit literature-search intent.',
+    };
+  }
   if (/(these|selected|confirmed)\s+(papers|articles)/i.test(text) && /compare|difference|limitation|design|endpoint|conclusion/i.test(text)) return { action: 'paper_discussion', reason: 'Discussion of selected papers.' };
   if (/recommend\s+again|re-?match|different\s+(topic|direction)|change\s+the\s+(population|endpoint|outcome)/i.test(text)) return { action: 'retopic', reason: 'Request to rebuild candidate topics.' };
   if (/research\s+(topic|question|direction)|narrow\s+(the\s+)?topic|candidate\s+topic/i.test(text)) return { action: 'topic', reason: 'Topic-development intent.' };
@@ -49,27 +57,8 @@ function parseJson(raw: string): IntentResult | null {
   }
 }
 
-async function buildPubMedQuery(message: string, proposedQuery: string | undefined, historyText: string) {
-  const candidate = String(proposedQuery ?? '').trim();
-  if (candidate && /\[(MeSH Terms|Title\/Abstract|Publication Type|Date - Publication)\]/i.test(candidate)) {
-    return { query: candidate, summary: candidate.replace(/\[[^\]]+\]/g, '').replace(/[()\"]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 220) };
-  }
-  const localQuery = buildFallbackMedicalQuery(message, historyText);
-  if (/\[(MeSH Terms|Title\/Abstract|Publication Type|Date - Publication)\]/i.test(localQuery.query)) {
-    return localQuery;
-  }
-  const systemPrompt = 'Convert the request into an English query that can be sent directly to PubMed ESearch. Prefer MeSH Terms plus Title/Abstract synonyms, join separate concepts with AND, and join synonyms with OR. Remove action words. Do not invent diseases, populations, interventions, or outcomes. Add date or publication-type limits only when requested. Return strict JSON: {"query":"...","summary":"..."}.';
-  try {
-    const raw = await invokeModel([
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: `Recent conversation:\n${historyText || '(none)'}\n\nCurrent request:\n${message}\n\nCandidate query:\n${candidate || '(none)'}` },
-    ], { temperature: 0.05 });
-    const parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] ?? raw) as { query?: string; summary?: string };
-    if (parsed.query?.trim()) return { query: parsed.query.trim(), summary: parsed.summary?.trim() || parsed.query.trim().slice(0, 220) };
-  } catch (error) {
-    console.warn('[Intent] Query generation failed; using the local fallback:', error);
-  }
-  return localQuery;
+function buildPubMedQuery(message: string) {
+  return buildFallbackMedicalQuery(message);
 }
 
 export async function POST(request: NextRequest) {
@@ -95,7 +84,7 @@ export async function POST(request: NextRequest) {
 
   decision ??= fallbackIntent(message);
   if (decision.action === 'search') {
-    const built = await buildPubMedQuery(message, decision.searchQuery, historyText);
+    const built = buildPubMedQuery(message);
     decision.searchQuery = built.query;
     decision.searchSummary = built.summary;
   }

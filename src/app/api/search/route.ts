@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { buildFallbackMedicalQuery } from '@/lib/search-query';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -122,28 +123,8 @@ async function fetchWithRetry(
   throw new Error(`${label} request failed or timed out: ${detail}`);
 }
 
-function fallbackNormalizePubMedQuery(raw: string): string {
-  const cleaned = raw
-    .replace(/please|search|look\s+up|find|papers?|articles?|literature|show\s+me/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  const terms: string[] = [];
-  if (/breast\s+(cancer|carcinoma)/i.test(cleaned)) {
-    terms.push('("Breast Neoplasms"[MeSH Terms] OR "breast cancer"[Title/Abstract] OR "breast carcinoma"[Title/Abstract])');
-  }
-  if (/chronic\s+kidney\s+disease|\bCKD\b/i.test(cleaned)) {
-    terms.push('("Kidney Diseases, Chronic"[MeSH Terms] OR "chronic kidney disease"[Title/Abstract] OR CKD[Title/Abstract])');
-  }
-  if (/SGLT2/i.test(cleaned)) {
-    terms.push('("Sodium-Glucose Transporter 2 Inhibitors"[MeSH Terms] OR "SGLT2 inhibitor"[Title/Abstract] OR "SGLT2 inhibitors"[Title/Abstract])');
-  }
-
-  return terms.length ? terms.join(' AND ') : cleaned;
-}
-
 async function normalizeQueryForPubMed(raw: string): Promise<string> {
-  return fallbackNormalizePubMedQuery(raw);
+  return buildFallbackMedicalQuery(raw).query;
 }
 
 async function normalizeQueryForWos(raw: string): Promise<string> {
