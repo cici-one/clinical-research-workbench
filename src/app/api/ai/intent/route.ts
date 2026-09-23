@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { invokeModel } from '@/lib/ai-provider';
 import { RESEARCH_INTENT_PROMPT } from '@/lib/research-intent-prompt';
+import { buildFallbackMedicalQuery } from '@/lib/search-query';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -48,23 +49,14 @@ function parseJson(raw: string): IntentResult | null {
   }
 }
 
-function fallbackMedicalQuery(message: string): { query: string; summary: string } {
-  const cleaned = message.replace(/please|search|look\s+up|find|papers?|articles?|literature|show\s+me/gi, ' ').replace(/\s+/g, ' ').trim();
-  const concepts: Array<[RegExp, string, string]> = [
-    [/breast\s+(cancer|carcinoma)/i, '("Breast Neoplasms"[MeSH Terms] OR "breast cancer"[Title/Abstract] OR "breast carcinoma"[Title/Abstract])', 'Breast cancer'],
-    [/chronic\s+kidney\s+disease|\bCKD\b/i, '("Kidney Diseases, Chronic"[MeSH Terms] OR "chronic kidney disease"[Title/Abstract] OR CKD[Title/Abstract])', 'Chronic kidney disease'],
-    [/SGLT2/i, '("Sodium-Glucose Transporter 2 Inhibitors"[MeSH Terms] OR "SGLT2 inhibitor"[Title/Abstract] OR "SGLT2 inhibitors"[Title/Abstract])', 'SGLT2 inhibitors'],
-  ];
-  const matched = concepts.filter(([pattern]) => pattern.test(cleaned));
-  return matched.length
-    ? { query: matched.map(([, query]) => query).join(' AND '), summary: matched.map(([, , label]) => label).join('; ') }
-    : { query: cleaned || message, summary: cleaned || message };
-}
-
 async function buildPubMedQuery(message: string, proposedQuery: string | undefined, historyText: string) {
   const candidate = String(proposedQuery ?? '').trim();
   if (candidate && /\[(MeSH Terms|Title\/Abstract|Publication Type|Date - Publication)\]/i.test(candidate)) {
     return { query: candidate, summary: candidate.replace(/\[[^\]]+\]/g, '').replace(/[()\"]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 220) };
+  }
+  const localQuery = buildFallbackMedicalQuery(message, historyText);
+  if (/\[(MeSH Terms|Title\/Abstract|Publication Type|Date - Publication)\]/i.test(localQuery.query)) {
+    return localQuery;
   }
   const systemPrompt = 'Convert the request into an English query that can be sent directly to PubMed ESearch. Prefer MeSH Terms plus Title/Abstract synonyms, join separate concepts with AND, and join synonyms with OR. Remove action words. Do not invent diseases, populations, interventions, or outcomes. Add date or publication-type limits only when requested. Return strict JSON: {"query":"...","summary":"..."}.';
   try {
@@ -77,7 +69,7 @@ async function buildPubMedQuery(message: string, proposedQuery: string | undefin
   } catch (error) {
     console.warn('[Intent] Query generation failed; using the local fallback:', error);
   }
-  return fallbackMedicalQuery(message);
+  return localQuery;
 }
 
 export async function POST(request: NextRequest) {

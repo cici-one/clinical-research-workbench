@@ -3,6 +3,22 @@
 import { useEffect, useMemo, useRef, useState, useCallback, type ReactNode } from 'react';
 import { ArrowLeft, ArrowUp, BarChart3, BookOpen, Bot, Check, ChevronLeft, ChevronRight, ExternalLink, FileText, Flame, History, Home, Paperclip, Pause, Pencil, PieChart, Plus, RotateCcw, Search, Send, UserRound, X } from 'lucide-react';
 import type { HistoryItem, Paper } from '@/types';
+import { buildFallbackMedicalQuery } from '@/lib/search-query';
+import {
+  DEMO_HOTSPOT_INSIGHT,
+  DEMO_HOTSPOTS,
+  DEMO_NARROWING_REPLY,
+  DEMO_PAPERS,
+  DEMO_PAPER_INSIGHT,
+  DEMO_REVIEW_FEEDBACK_REPLY,
+  DEMO_REVIEW_GUIDANCE_REPLY,
+  DEMO_SEARCH_QUERY,
+  DEMO_SEARCH_TERMS,
+  DEMO_SUPPLEMENTARY_SEARCH_REPLY,
+  DEMO_SYNTHESIS_REPLY,
+  DEMO_TOPIC_REPLY,
+  type DemoHotspotData,
+} from '@/lib/demo-data';
 import {
   addLocalFavorite,
   appendLocalMessage,
@@ -39,7 +55,9 @@ interface IntentDecision {
   reason?: string;
 }
 
-const academicImages = Array.from({ length: 7 }, (_, i) => `/images/academic-${String(i + 1).padStart(2, '0')}.jpg`);
+const APP_BASE_PATH = (process.env.NEXT_PUBLIC_BASE_PATH || '').replace(/\/$/, '');
+const appUrl = (path: string) => `${APP_BASE_PATH}${path}`;
+const academicImages = Array.from({ length: 7 }, (_, i) => appUrl(`/images/academic-${String(i + 1).padStart(2, '0')}.jpg`));
 const quickActions = ['research', 'search', 'hotspots', 'topics', 'review', 'materials'];
 
 const QUICK_HELP: Record<string, string> = {
@@ -161,29 +179,7 @@ export default function HomePage() {
   const [renamingHistoryId, setRenamingHistoryId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const [uploadedFileContext, setUploadedFileContext] = useState('');
-  const [hotspotData, setHotspotData] = useState<{
-    hotspots: Array<{
-      name: string;
-      score: number;
-      reason: string;
-      literatureScale?: number;
-      yearlyGrowth?: number | null;
-      recentActivity?: number;
-      cooccurrence?: number;
-      supportPmids?: string[];
-      confidence?: 'low' | 'medium' | 'high';
-      evidenceCoverage?: number;
-      directionMatch?: number;
-    }>;
-    stats?: {
-      total: number;
-      searchTotal?: number;
-      selectedDirectionCount?: number;
-      yearDistribution?: Array<{ year: number; count: number }>;
-      topKeywords?: string[];
-    };
-    analysisScope?: { fieldSample?: number; selectedDirection?: number; pubmedTotal?: number };
-  } | null>(null);
+  const [hotspotData, setHotspotData] = useState<DemoHotspotData | null>(null);
   const dragMode = useRef<'left' | 'right' | null>(null);
   const searchInFlight = useRef(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -449,7 +445,7 @@ export default function HomePage() {
     if (!pending.length) return;
     pending.forEach((paper) => translationRequestedRef.current.add(paper.id));
     try {
-      const res = await fetch('/api/ai/paper-tools', {
+      const res = await fetch(appUrl('/api/ai/paper-tools'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -474,8 +470,9 @@ export default function HomePage() {
   }, [titleTranslations]);
 
   useEffect(() => {
+    if (view === 'home' || userMode === 'demo') return;
     void requestTitleTranslations([...visiblePapers.slice(0, 20), ...visibleFavorites.slice(0, 20)]);
-  }, [visiblePapers, visibleFavorites, requestTitleTranslations]);
+  }, [visiblePapers, visibleFavorites, requestTitleTranslations, userMode, view]);
 
   const requestJournalMetrics = useCallback(async (items: Paper[]) => {
     const pending = items
@@ -513,7 +510,7 @@ export default function HomePage() {
           window.setTimeout(resolve, 1200);
         }
       });
-      const res = await fetch('/api/journal-metrics', {
+      const res = await fetch(appUrl('/api/journal-metrics'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ journals }),
@@ -539,8 +536,9 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
+    if (view === 'home' || userMode === 'demo') return;
     void requestJournalMetrics([...visiblePapers.slice(0, 6), ...visibleFavorites.slice(0, 6)]);
-  }, [visiblePapers, visibleFavorites, requestJournalMetrics]);
+  }, [visiblePapers, visibleFavorites, requestJournalMetrics, userMode, view]);
 
   useEffect(() => {
     if (!toast) return;
@@ -665,7 +663,7 @@ export default function HomePage() {
     if (typeof window !== 'undefined' && window.innerWidth <= 960) setMobileHistoryOpen(true);
     setRightCollapsed(true);
     setSidePanel('search');
-    setMessages([{ role: 'assistant', content: 'Demo starting. It will walk through all core features in order: Literature Search → Time Filter → JIF Filter → Load More → Select Papers → Paper Insight → Favorites & Library → Hotspot Analysis → Hotspot Insight → Topic Discussion → Review Guidance. Please do not interact during the demo.' }]);
+    setMessages([{ role: 'assistant', content: 'Demo starting in offline preset mode. It will walk through all core features without calling the language model or literature APIs: Literature Search → Time Filter → JIF Filter → Load More → Select Papers → Paper Insight → Favorites & Library → Hotspot Analysis → Hotspot Insight → Topic Discussion → Review Guidance.' }]);
     setPapers([]);
     setSelectedPaperIds([]);
     setConfirmedPaperIds([]);
@@ -677,194 +675,185 @@ export default function HomePage() {
     setPaperInsight(null);
     setHotspotInsight(null);
 
-    const SEARCH_QUERY = 'Search recent research progress on breast cancer';
+    const SEARCH_REQUEST = 'Search recent research progress on neoadjuvant immunotherapy for triple-negative breast cancer';
 
-    const waitIdle = async (maxMs = 60000) => {
-      const start = Date.now();
-      await sleep(500);
-      while (Date.now() - start < maxMs) {
-        await sleep(280);
-        if (
-          !searchingRef.current &&
-          !analyzingRef.current &&
-          !streamingRef.current &&
-          !routingRef.current &&
-          !fileParsingRef.current &&
-          !searchInFlight.current &&
-          !paperInsightLoadingRef.current &&
-          !hotspotInsightLoadingRef.current
-        ) return;
-      }
-    };
-
-    const typeText = async (text: string, speed = 85) => {
+    const typeText = async (text: string, speed = 18) => {
       for (let i = 1; i <= text.length; i += 1) {
         setInput(text.slice(0, i));
         await sleep(speed);
       }
     };
 
-    const typeAndSend = async (text: string, speed = 60) => {
+    const typeAndReply = async (text: string, reply: string, speed = 18) => {
       await typeText(text, speed);
-      await sleep(550);
-      const promise = sendMessage(text, 'demo');
+      await sleep(280);
       setInput('');
-      await promise;
+      setMessages((current) => [...current, { role: 'user', content: text }]);
+      await sleep(420);
+      setMessages((current) => [...current, { role: 'assistant', content: reply }]);
     };
 
     try {
       setDemoStep(1);
       setSidePanel('search');
       setRightCollapsed(false);
-      await sleep(500);
-      await typeAndSend(SEARCH_QUERY, 75);
-      await waitIdle();
+      await sleep(350);
+      await typeText(SEARCH_REQUEST);
+      setInput('');
+      setMessages((current) => [...current, { role: 'user', content: SEARCH_REQUEST }]);
+      await sleep(420);
+      setActiveSearchQuery(DEMO_SEARCH_QUERY);
+      setActiveOriginalSearchText(SEARCH_REQUEST);
+      setSearchEditText(DEMO_SEARCH_TERMS);
+      setSearchSources(['pubmed']);
+      setPapers(DEMO_PAPERS.slice(0, 4));
+      setSourceTotals({ pubmed: 286, wos: 0 });
+      setSourceLoaded({ pubmed: 4, wos: 0 });
+      setSearchTotalCount(286);
+      setSearchWarnings([]);
+      setMessages((current) => [...current, {
+        role: 'assistant',
+        content: `Preset demo literature loaded: 286 simulated hits, 4 representative records currently shown.\nIntent-recognized PubMed query: ${DEMO_SEARCH_QUERY}`,
+      }]);
       await sleep(700);
 
       setDemoStep(2);
       setMessages((m) => [...m, { role: 'system', content: 'Demonstrating the time filter: narrowing the search scope to the last 3 years.' }]);
-      await sleep(500);
-      handleUseTimeChange(true);
-      await waitIdle();
-      await sleep(500);
-      handleYearRangeChange('3y');
-      await waitIdle();
+      setUseTime(true);
+      setYearRange('3y');
       await sleep(700);
 
       setDemoStep(3);
       setMessages((m) => [...m, { role: 'system', content: 'Demonstrating the impact-factor filter: keeping only high-impact papers with JIF ≥ 5.' }]);
-      await sleep(500);
-      handleMinJifChange(5);
-      handleUseJifChange(true);
-      await waitIdle();
+      setMinJif(5);
+      setUseJif(true);
       await sleep(1200);
-      handleUseJifChange(false);
+      setUseJif(false);
       await sleep(500);
 
       setDemoStep(4);
       setMessages((m) => [...m, { role: 'system', content: 'Demonstrating Load More: paginating through the remaining search results.' }]);
       await sleep(500);
-      await loadMorePapers();
-      await waitIdle();
+      setPapers(DEMO_PAPERS);
+      setSourceLoaded({ pubmed: DEMO_PAPERS.length, wos: 0 });
       await sleep(700);
 
       setDemoStep(5);
       setSidePanel('search');
       setRightCollapsed(false);
       await sleep(500);
-      const demoPapers = papersRef.current.slice(0, 4);
+      const demoPapers = DEMO_PAPERS.slice(0, 4);
       for (let i = 0; i < demoPapers.length; i += 1) {
         setSelectedPaperIds((ids) => (ids.includes(demoPapers[i].id) ? ids : [...ids, demoPapers[i].id]));
         await sleep(420);
       }
-      await sleep(600);
-      confirmPaperSelection();
-      await sleep(1400);
-      discussConfirmedPapers();
+      const confirmedIds = demoPapers.map((paper) => paper.id);
+      setConfirmedPaperIds(confirmedIds);
+      setDiscussionPaperIds(confirmedIds);
+      setMessages((current) => [...current, {
+        role: 'assistant',
+        content: '4 preset papers confirmed as anchors for the demo research direction. The following discussion compares their populations, regimens, endpoints, findings, and limitations.',
+      }]);
       await sleep(900);
 
       setDemoStep(6);
       setSidePanel('search');
       setRightCollapsed(false);
       await sleep(500);
-      const firstConfirmedId = confirmedPaperIdsRef.current[0];
-      const firstConfirmed = papersRef.current.find((p) => p.id === firstConfirmedId) || papersRef.current[0];
-      if (firstConfirmed) {
-        setMessages((m) => [...m, { role: 'system', content: 'Demonstrating Paper Insight: opening the AI interpretation of a single paper.' }]);
-        await sleep(400);
-        await interpretPaper(firstConfirmed);
-        await waitIdle();
-        await sleep(2200);
-        setPaperInsight(null);
-      }
+      const firstConfirmed = DEMO_PAPERS[0];
+      setMessages((m) => [...m, { role: 'system', content: 'Demonstrating Paper Insight with a preset evidence interpretation.' }]);
+      await sleep(400);
+      setPaperInsight({ paper: firstConfirmed, content: DEMO_PAPER_INSIGHT });
+      await sleep(2200);
+      setPaperInsight(null);
       await sleep(500);
 
       setDemoStep(7);
-      const favId = confirmedPaperIdsRef.current[0];
-      const favPaper = papersRef.current.find((p) => p.id === favId) || papersRef.current[1] || papersRef.current[0];
-      if (favPaper) {
-        setMessages((m) => [...m, { role: 'system', content: 'Demonstrating favorites: adding a paper to your personal library and opening the library view.' }]);
-        await sleep(400);
-        await favorite(favPaper);
-        await sleep(900);
-        openLibraryView();
-        await sleep(1800);
-        setView('app');
-        await sleep(500);
-      }
+      const favPaper = { ...DEMO_PAPERS[0], favorite: true };
+      setMessages((m) => [...m, { role: 'system', content: 'Demonstrating favorites: adding a paper to the temporary demo library and opening the library view.' }]);
+      setFavorites((current) => current.some((paper) => paper.id === favPaper.id) ? current : [favPaper, ...current]);
+      setToast('Added to favorites (kept for this demo session only)');
+      await sleep(900);
+      setView('library');
+      await sleep(1800);
+      setView('app');
+      await sleep(500);
 
       setDemoStep(8);
       setSidePanel('hotspots');
       setRightCollapsed(false);
       await sleep(500);
-      await typeAndSend('Analyze the research hotspots within the current search scope', 45);
-      await waitIdle();
+      await typeAndReply(
+        'Analyze the research hotspots within the current search scope',
+        'Preset hotspot analysis loaded from the walkthrough dataset. No model or external database was called.',
+      );
+      setHotspotData(DEMO_HOTSPOTS);
       await sleep(1200);
 
       setDemoStep(9);
-      const firstHotspot = hotspotDataRef.current?.hotspots?.[0];
-      if (firstHotspot) {
-        setMessages((m) => [...m, { role: 'system', content: 'Demonstrating Hotspot Insight: reviewing how a hotspot direction is formed and what evidence supports it.' }]);
-        await sleep(400);
-        await explainHotspot(firstHotspot);
-        await waitIdle();
-        await sleep(2200);
-        setHotspotInsight(null);
-      }
+      const firstHotspot = DEMO_HOTSPOTS.hotspots[0];
+      setMessages((m) => [...m, { role: 'system', content: 'Demonstrating Hotspot Insight with a preset evidence explanation.' }]);
+      await sleep(400);
+      setHotspotInsight({ title: firstHotspot.name, content: DEMO_HOTSPOT_INSIGHT });
+      await sleep(2200);
+      setHotspotInsight(null);
       await sleep(500);
 
       setDemoStep(10);
       setRightCollapsed(true);
       setSidePanel('search');
       await sleep(500);
-      await typeAndSend('Based on these papers and hotspots, help me discuss research topic directions that can be narrowed down', 40);
-      await waitIdle();
+      await typeAndReply(
+        'Based on these papers and hotspots, help me discuss research topic directions that can be narrowed down',
+        DEMO_TOPIC_REPLY,
+      );
       await sleep(1500);
-      await typeAndSend('I prefer direction 1: predictive value of biomarkers for neoadjuvant immunotherapy in triple-negative breast cancer. Help me narrow the research question further', 40);
-      await waitIdle();
+      await typeAndReply(
+        'I prefer direction 1: predictive value of biomarkers for neoadjuvant immunotherapy in triple-negative breast cancer. Help me narrow the research question further',
+        DEMO_NARROWING_REPLY,
+      );
       await sleep(1500);
 
       setDemoStep(11);
       await sleep(500);
-      await typeAndSend('Guide me on how to write a review in this direction, including structure suggestions and key writing points', 40);
-      await waitIdle();
+      await typeAndReply(
+        'Guide me on how to write a review in this direction, including structure suggestions and key writing points',
+        DEMO_REVIEW_GUIDANCE_REPLY,
+      );
       await sleep(1500);
 
       setDemoStep(12);
-      setMessages((m) => [...m, { role: 'system', content: 'Demonstrating file upload: uploading a student-written review draft for rigorous agent feedback.' }]);
+      setMessages((m) => [...m, { role: 'system', content: 'Demonstrating file upload with a preset student review draft. The demo does not upload or parse a real file.' }]);
       await sleep(500);
-      const reviewDraftText = [
-        'Progress in Biomarkers for Neoadjuvant Immunotherapy in Breast Cancer (Student Review Draft)',
-        '',
-        'In recent years, the application of immune checkpoint inhibitors in neoadjuvant breast cancer treatment has attracted wide attention. Multiple clinical studies suggest that PD-L1 expression, tumor mutational burden (TMB) and tumor-infiltrating lymphocytes (TILs) may be associated with pathological complete response (pCR) rates.',
-        '',
-        'The Keynote-522 trial confirmed that pembrolizumab combined with chemotherapy significantly improves pCR rates in early-stage triple-negative breast cancer. The Impassion031 trial showed that atezolizumab combined with chemotherapy also improves pCR. However, PD-L1 interpretation criteria differ across studies, leaving the predictive value of these biomarkers controversial.',
-        '',
-        'In summary, immunotherapy brings new hope to neoadjuvant breast cancer treatment, and more research is needed to explore precise biomarkers.',
-      ].join('\n');
-      const reviewFile = new File([reviewDraftText], 'my-review-draft-breast-cancer-neoadjuvant-immunotherapy-biomarkers.txt', { type: 'text/plain' });
-      await submitAttachedFiles(
-        [reviewFile],
-        'This is my review draft written following the framework above. Please rigorously evaluate its weaknesses and give revision suggestions',
-        'demo',
-        'review',
-      );
-      await waitIdle();
+      setMessages((current) => [...current, {
+        role: 'user',
+        content: 'This is my review draft written following the framework above. Please rigorously evaluate its weaknesses and give revision suggestions',
+        attachments: ['demo-review-draft.txt'],
+      }]);
+      await sleep(420);
+      setMessages((current) => [...current, { role: 'assistant', content: DEMO_REVIEW_FEEDBACK_REPLY }]);
       await sleep(1200);
 
       setDemoStep(13);
       await sleep(500);
-      await typeAndSend('Regarding the "insufficient evidence synthesis" issue you pointed out, please demonstrate how to compare and synthesize the Keynote-522 and Impassion031 studies instead of listing them one by one', 40);
-      await waitIdle();
+      await typeAndReply(
+        'Regarding the "insufficient evidence synthesis" issue you pointed out, please demonstrate how to compare and synthesize the Keynote-522 and Impassion031 studies instead of listing them one by one',
+        DEMO_SYNTHESIS_REPLY,
+      );
       await sleep(1500);
 
       setDemoStep(14);
       await sleep(500);
-      await typeAndSend('Your review mentioned inconsistent PD-L1 interpretation criteria. Please search for real literature evidence supporting this controversy', 40);
-      await waitIdle();
+      await typeAndReply(
+        'Your review mentioned inconsistent PD-L1 interpretation criteria. Please search for literature evidence supporting this controversy',
+        DEMO_SUPPLEMENTARY_SEARCH_REPLY,
+      );
+      setSidePanel('search');
+      setRightCollapsed(false);
+      setSearchEditText('PD-L1 assay scoring cutoff concordance in triple-negative breast cancer');
       await sleep(1500);
 
-      setMessages((m) => [...m, { role: 'system', content: 'Demo finished — all core features have been shown. Return home to start your own research, or watch the demo again.' }]);
+      setMessages((m) => [...m, { role: 'system', content: 'Offline preset demo finished — all core features were shown without calling the model or literature APIs. Return home to start a live research session, or watch the demo again.' }]);
     } catch (error) {
       console.warn('[Demo] The walkthrough stopped unexpectedly:', error);
     } finally {
@@ -914,6 +903,14 @@ export default function HomePage() {
 
   useEffect(() => {
     if (routing || streaming || searching || analyzing || fileParsing) return;
+    if (view !== 'app') return;
+    if (userMode === 'demo') {
+      setNextSuggestions([
+        { label: 'Compare trial evidence', instruction: 'Show the preset comparison of the landmark trials.' },
+        { label: 'Narrow the topic', instruction: 'Show the preset topic-narrowing guidance.' },
+      ]);
+      return;
+    }
     const lastAssistantIndex = [...messages].map((m) => m.role).lastIndexOf('assistant');
     if (lastAssistantIndex < 0) return;
     const assistant = messages[lastAssistantIndex];
@@ -928,7 +925,7 @@ export default function HomePage() {
     const timer = window.setTimeout(() => controller.abort(), 3500);
     void (async () => {
       try {
-        const res = await fetch('/api/ai/suggestions', {
+        const res = await fetch(appUrl('/api/ai/suggestions'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           signal: controller.signal,
@@ -981,7 +978,7 @@ export default function HomePage() {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [messages, activeQuick, confirmedPapers, routing, streaming, searching, analyzing, fileParsing]); // dynamic-next-suggestions
+  }, [messages, activeQuick, confirmedPapers, routing, streaming, searching, analyzing, fileParsing, userMode, view]); // dynamic-next-suggestions
 
   // Stream chat via SSE
   async function streamChat(userMessage: string, historyContext?: ChatMsg[], extraContext?: string) {
@@ -1002,7 +999,7 @@ export default function HomePage() {
         .slice(-10)
         .map((m) => ({ role: m.role, content: m.content }));
 
-      const res = await fetch('/api/ai/chat', {
+      const res = await fetch(appUrl('/api/ai/chat'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
@@ -1200,6 +1197,22 @@ export default function HomePage() {
       return;
     }
 
+    if ((modeOverride ?? userModeRef.current) === 'demo') {
+      if (query && appendUser) setMessages((current) => [...current, { role: 'user', content: naturalQuery }]);
+      setPapers(DEMO_PAPERS);
+      setSourceTotals({ pubmed: 286, wos: 0 });
+      setSourceLoaded({ pubmed: DEMO_PAPERS.length, wos: 0 });
+      setSearchTotalCount(286);
+      setSearchWarnings([]);
+      setActiveSearchQuery(DEMO_SEARCH_QUERY);
+      setActiveOriginalSearchText(naturalQuery);
+      setSearchEditText(DEMO_SEARCH_TERMS);
+      setSidePanel('search');
+      setRightCollapsed(false);
+      setMessages((current) => [...current, { role: 'assistant', content: DEMO_SUPPLEMENTARY_SEARCH_REPLY }]);
+      return;
+    }
+
     await ensureConversation(naturalQuery, 'search', modeOverride);
     searchInFlight.current = true;
     if (query && appendUser) setMessages((m) => [...m, { role: 'user', content: naturalQuery }]);
@@ -1217,7 +1230,11 @@ export default function HomePage() {
     setSearchTotalCount(0);
     setActiveSearchQuery(q);
     setActiveOriginalSearchText(naturalQuery);
-    setSearchEditText(naturalQuery);
+    const displayTerms = searchSummary?.trim() || buildFallbackMedicalQuery(
+      naturalQuery,
+      messagesRef.current.slice(-8).map((message) => message.content).join('\n'),
+    ).summary;
+    setSearchEditText(displayTerms);
 
     setSearching(true);
     setSidePanel('search');
@@ -1237,7 +1254,7 @@ export default function HomePage() {
 
     try {
       if (sources.includes('pubmed')) {
-        const res = await fetch('/api/search', {
+        const res = await fetch(appUrl('/api/search'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           signal: searchController.signal,
@@ -1265,7 +1282,7 @@ export default function HomePage() {
       }
 
       if (sources.includes('wos')) {
-        const res = await fetch('/api/search', {
+        const res = await fetch(appUrl('/api/search'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           signal: searchController.signal,
@@ -1331,6 +1348,13 @@ export default function HomePage() {
     const activeOriginal = activeOriginalSearchTextRef.current;
     if ((!activeQuery && !activeOriginal) || searching || loadingMore || searchInFlight.current) return;
 
+    if (userModeRef.current === 'demo') {
+      setPapers(DEMO_PAPERS);
+      setSourceLoaded({ pubmed: DEMO_PAPERS.length, wos: 0 });
+      setSearchTotalCount(286);
+      return;
+    }
+
     setLoadingMore(true);
     let nextPapers = papersRef.current;
     const nextTotals = { ...sourceTotalsRef.current };
@@ -1342,7 +1366,7 @@ export default function HomePage() {
 
     try {
       if (sources.includes('pubmed') && nextLoaded.pubmed < nextTotals.pubmed) {
-        const res = await fetch('/api/search', {
+        const res = await fetch(appUrl('/api/search'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1363,7 +1387,7 @@ export default function HomePage() {
       }
 
       if (sources.includes('wos') && nextLoaded.wos < nextTotals.wos) {
-        const res = await fetch('/api/search', {
+        const res = await fetch(appUrl('/api/search'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1405,6 +1429,15 @@ export default function HomePage() {
   async function refreshSearchForTime(nextUseTime: boolean, nextYearRange: string, sourcesOverride?: LiteratureSource[]) {
     if ((!activeSearchQuery && !activeOriginalSearchText) || searchInFlight.current || searching || streaming) return;
 
+    if (userModeRef.current === 'demo') {
+      setPapers(DEMO_PAPERS);
+      setSourceTotals({ pubmed: 286, wos: 0 });
+      setSourceLoaded({ pubmed: DEMO_PAPERS.length, wos: 0 });
+      setSearchTotalCount(286);
+      setSearchWarnings([]);
+      return;
+    }
+
     searchInFlight.current = true;
     setSearching(true);
     setSidePanel('search');
@@ -1423,7 +1456,7 @@ export default function HomePage() {
 
     try {
       if (sources.includes('pubmed')) {
-        const res = await fetch('/api/search', {
+        const res = await fetch(appUrl('/api/search'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1444,7 +1477,7 @@ export default function HomePage() {
       }
 
       if (sources.includes('wos')) {
-        const res = await fetch('/api/search', {
+        const res = await fetch(appUrl('/api/search'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1515,8 +1548,17 @@ export default function HomePage() {
     const text = searchEditTextRef.current.trim();
     if (!text || searching || analyzing || streaming) return;
     setMessages((current) => [...current, { role: 'user', content: `New search: ${text}` }]);
+    if (userModeRef.current === 'demo') {
+      setPapers(DEMO_PAPERS);
+      setSourceTotals({ pubmed: 286, wos: 0 });
+      setSourceLoaded({ pubmed: DEMO_PAPERS.length, wos: 0 });
+      setSearchTotalCount(286);
+      setSearchWarnings([]);
+      setMessages((current) => [...current, { role: 'assistant', content: DEMO_SUPPLEMENTARY_SEARCH_REPLY }]);
+      return;
+    }
     try {
-      const intentRes = await fetch('/api/ai/intent', {
+      const intentRes = await fetch(appUrl('/api/ai/intent'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1527,7 +1569,11 @@ export default function HomePage() {
       const intent = await intentRes.json();
       await runSearch(intent.searchQuery || text, false, intent.searchSummary, text);
     } catch {
-      await runSearch(text, false, undefined, text);
+      const fallback = buildFallbackMedicalQuery(
+        text,
+        messagesRef.current.slice(-8).map((message) => message.content).join('\n'),
+      );
+      await runSearch(fallback.query, false, fallback.summary, text);
     }
   }
 
@@ -1536,6 +1582,14 @@ async function runHotspots(query?: string, appendUser = true, modeOverride?: Use
   if (!requireTurn(modeOverride) || analyzing || searching || streaming || fileParsing) return;
   if (query && appendUser) setMessages((m) => [...m, { role: 'user', content: query }]);
   else if (!query) setInput('');
+
+  if ((modeOverride ?? userModeRef.current) === 'demo') {
+    setHotspotData(DEMO_HOTSPOTS);
+    setSidePanel('hotspots');
+    setRightCollapsed(false);
+    setMessages((current) => [...current, { role: 'assistant', content: 'Preset hotspot analysis loaded. No model or external database was called.' }]);
+    return;
+  }
 
   if (!papersRef.current.length && !activeSearchQueryRef.current) {
     setMessages((m) => [
@@ -1562,7 +1616,7 @@ async function runHotspots(query?: string, appendUser = true, modeOverride?: Use
   const hotspotTimer = window.setTimeout(() => hotspotController.abort(), 90000);
 
   try {
-    const res = await fetch('/api/hotspots', {
+    const res = await fetch(appUrl('/api/hotspots'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: hotspotController.signal,
@@ -1594,9 +1648,9 @@ async function runHotspots(query?: string, appendUser = true, modeOverride?: Use
 
 async function requestIntentWithTimeout(text: string) {
     const controller = new AbortController();
-    const timer = window.setTimeout(() => controller.abort(), 3000);
+    const timer = window.setTimeout(() => controller.abort(), 15000);
     try {
-      const intentRes = await fetch('/api/ai/intent', {
+      const intentRes = await fetch(appUrl('/api/ai/intent'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
@@ -1649,8 +1703,59 @@ async function sendMessage(overrideText?: string, modeOverride?: UserMode, hidde
     setMessages((m) => [...m, { role: 'user', content: text }]);
 
     const immediateAction = getImmediateAction(text, hiddenInstruction);
+    if (effectiveMode === 'demo') {
+      if (immediateAction === 'search') {
+        setPapers(DEMO_PAPERS);
+        setSourceTotals({ pubmed: 286, wos: 0 });
+        setSourceLoaded({ pubmed: DEMO_PAPERS.length, wos: 0 });
+        setSearchTotalCount(286);
+        setActiveSearchQuery(DEMO_SEARCH_QUERY);
+        setActiveOriginalSearchText(text);
+        setSearchEditText(DEMO_SEARCH_TERMS);
+        setSidePanel('search');
+        setRightCollapsed(false);
+        setMessages((current) => [...current, { role: 'assistant', content: DEMO_SUPPLEMENTARY_SEARCH_REPLY }]);
+        return;
+      }
+      if (immediateAction === 'hotspots') {
+        setHotspotData(DEMO_HOTSPOTS);
+        setSidePanel('hotspots');
+        setRightCollapsed(false);
+        setMessages((current) => [...current, { role: 'assistant', content: 'Preset hotspot analysis loaded. No model or external database was called.' }]);
+        return;
+      }
+      const reply = /review|outline|draft|structure/i.test(text)
+        ? DEMO_REVIEW_GUIDANCE_REPLY
+        : /compare|synthesi|Keynote|Impassion/i.test(text)
+          ? DEMO_SYNTHESIS_REPLY
+          : /narrow|prefer|direction/i.test(text)
+            ? DEMO_NARROWING_REPLY
+            : DEMO_TOPIC_REPLY;
+      setMessages((current) => [...current, { role: 'assistant', content: reply }]);
+      return;
+    }
+
     if (immediateAction === 'search') {
-      await runSearch(text, false, undefined, text, effectiveMode);
+      setRouting(true);
+      let intent: IntentDecision | null = null;
+      try {
+        intent = await requestIntentWithTimeout(text);
+      } catch (error) {
+        console.warn('[Intent] Search-query generation failed; using local concept extraction:', error);
+      } finally {
+        setRouting(false);
+      }
+      const fallback = buildFallbackMedicalQuery(
+        text,
+        messagesRef.current.slice(-8).map((message) => message.content).join('\n'),
+      );
+      await runSearch(
+        intent?.searchQuery || fallback.query,
+        false,
+        intent?.searchSummary || fallback.summary,
+        text,
+        effectiveMode,
+      );
       return;
     }
     if (immediateAction === 'hotspots') {
@@ -1719,7 +1824,11 @@ async function sendMessage(overrideText?: string, modeOverride?: UserMode, hidde
       await streamChat(text, undefined, hiddenInstruction);
     } catch {
       if (/search|find\s+(papers|articles|literature)|research\s+progress|clinical\s+evidence|PubMed|Web\s*of\s*Science|impact\s+factor|JCR/i.test(text)) {
-        await runSearch(text, false, undefined, text, effectiveMode);
+        const fallback = buildFallbackMedicalQuery(
+          text,
+          messagesRef.current.slice(-8).map((message) => message.content).join('\n'),
+        );
+        await runSearch(fallback.query, false, fallback.summary, text, effectiveMode);
         return;
       }
       if (/hotspot|research\s+trend|research\s+frontier/i.test(text)) {
@@ -1737,7 +1846,7 @@ async function sendMessage(overrideText?: string, modeOverride?: UserMode, hidde
       setSidePanel('search');
       setRightCollapsed(false);
       if (input.trim()) {
-        runSearch();
+        void sendMessage();
       } else {
         setMessages((m) => [
           ...m,
@@ -1774,10 +1883,14 @@ async function sendMessage(overrideText?: string, modeOverride?: UserMode, hidde
   }
 
   async function explainHotspot(item: NonNullable<typeof hotspotData>['hotspots'][number]) {
+    if (userModeRef.current === 'demo') {
+      setHotspotInsight({ title: item.name, content: DEMO_HOTSPOT_INSIGHT });
+      return;
+    }
     setHotspotInsight({ title: item.name, content: '' });
     setHotspotInsightLoading(true);
     try {
-      const res = await fetch('/api/ai/paper-tools', {
+      const res = await fetch(appUrl('/api/ai/paper-tools'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1843,6 +1956,12 @@ async function submitAttachedFiles(files: File[], pendingIntent: string, modeOve
     },
   ]);
 
+  if ((modeOverride ?? userModeRef.current) === 'demo') {
+    setUploadNote(`Preset demo file: ${attachmentNames.join(', ')}`);
+    setMessages((current) => [...current, { role: 'assistant', content: DEMO_REVIEW_FEEDBACK_REPLY }]);
+    return;
+  }
+
   const effectiveStage = stageOverride ?? (activeQuickRef.current === 'review' ? 'review' : 'materials');
   const conversationForUpload = await ensureConversation(
     pendingIntent || attachmentNames.join(', '),
@@ -1857,7 +1976,7 @@ async function submitAttachedFiles(files: File[], pendingIntent: string, modeOve
   setUploadNote('Parsing files, please wait');
 
   try {
-    const res = await fetch('/api/files/parse', { method: 'POST', body: form });
+    const res = await fetch(appUrl('/api/files/parse'), { method: 'POST', body: form });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Parsing failed');
 
@@ -2008,10 +2127,14 @@ async function interpretPaper(paper: Paper) {
     titleZh: paper.titleZh || titleTranslationsRef.current[paper.id],
     abstract: cleanAbstract(paper.abstract),
   };
+  if (userModeRef.current === 'demo') {
+    setPaperInsight({ paper: bilingualPaper, content: DEMO_PAPER_INSIGHT });
+    return;
+  }
   setPaperInsight({ paper: bilingualPaper, content: '' });
   setPaperInsightLoading(true);
   try {
-    const res = await fetch('/api/ai/paper-tools', {
+    const res = await fetch(appUrl('/api/ai/paper-tools'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'insight', paper: bilingualPaper }),
@@ -2190,7 +2313,6 @@ function startNewConversation() {
               <span className="demo-hint"><span className="demo-hint-arrow">↓</span> Watch demo</span>
               <button className="demo-btn" onClick={() => void startDemo()}>Start Demo</button>
             </div>
-            <button className="soft-btn" onClick={openLibraryView}><BookOpen size={16} /> My Library</button>
           </div>
         </header>
         <section className="home-content">
